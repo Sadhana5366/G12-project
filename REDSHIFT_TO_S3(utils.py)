@@ -1,0 +1,72 @@
+import json
+import csv
+import psycopg2
+import os
+
+
+def aws_redshift_connection():
+    
+    try:
+        Access_key = os.getenv("AWS_access_Key")
+        Access_secrete = os.getenv("AWS_secrete_access_key")
+        dbname = os.getenv("red_db_name")
+        host = os.getenv("red_host")
+        user = os.getenv("red_username")
+        password = os.getenv("red_password")
+
+
+        # Connect to RDS
+        connection = psycopg2.connect(
+            dbname=dbname, host=host, port="5439", user=user, password=password
+        )
+        
+        curs = connection.cursor()
+        
+        return connection, curs
+
+    except Exception as e:
+        print(f"Error: {e}")
+    
+        
+        
+def fetc_from_redshift(cursor, query):
+    
+    try:
+        cursor.execute(query)
+    
+        # Fetch the data
+        result = cursor.fetchall()
+    
+        return result
+    
+    except Exception as e:
+        print(f"Error: {e}")
+
+
+def write_to_csv(data, file_name, header=None):
+
+    try:
+
+        # preprocess data
+        data = [list(x) for x in data]
+        if header:
+            header = list(header)
+
+        with open(file='/tmp/'+file_name, mode='w', newline='') as fp:
+            writer = csv.writer(fp)
+
+            # writing header
+            writer.writerow(header)
+            writer.writerows(data)
+
+    except Exception as e:
+        print(f"Error: {e}")
+        
+        
+def dump_to_s3(s3,bucket_name, file_name, destination_path):
+
+    try:
+        s3.upload_file('/tmp/'+file_name, bucket_name, destination_path)
+    
+    except Exception as e:
+        print(f"Error: {e}")

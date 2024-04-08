@@ -1,0 +1,35 @@
+import boto3
+import uuid
+import json
+
+def lambda_handler(event, context):
+    
+    
+    # Specify your Step Functions state machine ARN
+    state_machine_arn = 'arn:aws:states:ap-south-1:465926829206:stateMachine:MyStateMachine-dxckqms54'
+    
+    
+    # Create a Step Functions client
+    sf_client = boto3.client('stepfunctions')
+
+    # Input data for the Step Functions execution (if needed)
+    #input_data = '{"event":"event"}'
+    input_data = json.dumps({"event":str(event)})
+    
+    uuid_1 = str(uuid.uuid4())
+
+    # Start execution of the Step Functions state machine
+    response = sf_client.start_execution(
+        stateMachineArn=state_machine_arn,
+        name=uuid_1,  # Provide a unique execution name
+        input=input_data
+    )
+
+    # Print the execution ARN
+    print(f"Step Functions execution ARN: {response['executionArn']}")
+
+    return {
+        
+        'statusCode': 200,
+        'body': 'Step Functions execution triggered successfully!'
+    }

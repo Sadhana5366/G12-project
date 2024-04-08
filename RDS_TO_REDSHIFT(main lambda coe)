@@ -1,0 +1,109 @@
+import json
+import csv
+import pymysql
+import psycopg2
+import os
+
+def aws_rds_connection():
+    
+    try:
+        # RDS configuration
+        rds_host = os.getenv("rds_host")
+        rds_db_username = os.getenv("rds_username")
+        rds_db_password = os.getenv("rds_password")
+        rds_db_name = os.getenv("rds_db_name")
+        #rds_table_name = os.getenv("rds_table_name")
+
+
+        # Connect to RDS
+        rds_conn = pymysql.connect(host=rds_host, user=rds_db_username, passwd=rds_db_password, database=rds_db_name)
+        rds_cursor = rds_conn.cursor()
+        return rds_conn,rds_cursor
+
+    except Exception as e:
+        print(f"Error: {e}")
+        
+        
+def aws_redshift_connection():
+    
+    try:
+        
+        red_dbname = os.getenv("red_db_name")
+        red_host = os.getenv("red_host")
+        red_user = os.getenv("red_username")
+        red_password = os.getenv("red_password")
+
+
+        # Connect to RDS
+        red_connection = psycopg2.connect(
+            dbname=red_dbname, host=red_host, port="5439", user=red_user, password=red_password
+        )
+        
+        red_curs = red_connection.cursor()
+        
+        return red_connection, red_curs
+
+    except Exception as e:
+        print(f"Error: {e}")
+        
+        
+def fetc_from_rds(cursor, query):
+    
+    try:
+        cursor.execute(query)
+    
+        # Fetch the data
+        result = cursor.fetchall()
+    
+        return result
+    
+    except Exception as e:
+        print(f"Error: {e}")
+        
+
+def write_to_csv(data, file_name, header=None):
+
+    try:
+
+        # preprocess data
+        data = [list(x) for x in data]
+        header = [list(x)[0] for x in header]
+
+        with open(file='/tmp/'+file_name, mode='w', newline='') as fp:
+            writer = csv.writer(fp)
+
+            # writing header
+            writer.writerow(header)
+            writer.writerows(data)
+
+    except Exception as e:
+        print(f"Error: {e}")
+        
+        
+
+def dump_to_redshift(red_conn,red_cursor,data,header,table_name):
+
+    try:
+        query=f"CREATE TABLE {table_name} {header}"
+        print(query)
+        # red_cursor.execute() 
+        # red_conn.commit() 
+        # # table_name = os.getenv("red_table_name")
+        # from_path = '/tmp/'+ "sample.csv"
+        # Access_key = os.getenv("AWS_Access_key")
+        # Access_secrete = os.getenv("AWS_Access_Secrete_key") 
+        
+        
+        for i in data:
+        
+            quary = "INSERT INTO {} {} VALUES {}".format(table_name,header,i)
+        
+        
+            red_cursor.execute(quary)
+            red_conn.commit()
+        
+    except Exception as e:
+        print(f"Error: {e}")
+        
+        
+

@@ -1,0 +1,84 @@
+# import ing libraries
+import json
+import boto3
+import pymysql
+import psycopg2
+import os
+
+
+
+from utils import aws_rds_connection, fetc_from_rds, write_to_csv, dump_to_redshift, aws_redshift_connection
+
+def lambda_handler(event, context):
+
+    try:
+        
+        # creating connection with server
+        rds_conn,rds_cursor = aws_rds_connection()
+        print("rds connection done")
+        #rds_table_name = os.getenv("rds_table_name")
+        
+        rds_cursor.execute("Show tables;")
+ 
+        rds_conn.commit()
+        myresult = rds_cursor.fetchall()
+        
+        table_list = [table[0] for table in list(myresult) if table[0].endswith("_table")]
+        
+        print(table_list)
+        
+      
+        # creating redshift connection
+        red_conn,red_cursor = aws_redshift_connection()
+        print("redshift connection done")
+        
+        for rds_table_name in table_list:
+            print(rds_table_name)
+        
+            # fetching header from data
+            header = fetc_from_rds(cursor=rds_cursor,query=f"show COLUMNS from {rds_table_name};")
+            header = str(tuple([i[0].lower() for i in header])).replace("'",'') 
+        
+    
+            # fetching data
+            data = fetc_from_rds(cursor=rds_cursor,query=f"SELECT * FROM {rds_table_name};")
+            
+              # Get the schema of the employees 
+            try:
+                rds_cursor.execute(f"SHOW CREATE TABLE {rds_table_name}")
+                
+               
+                # Get the results of the 
+            
+                schema = rds_cursor.fetchone()[1]
+                querry = schema.replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS" ).replace("`","").split(")")[0] + ");"
+                
+                # Print the schema
+                print(querry)
+                red_cursor.execute(querry)
+                red_conn.commit()
+                print('table created successfully')
+                # print(data)
+                # print(header)
+            except:
+                pass 
+            
+    
+            #dump to redshift
+            dump_to_redshift(red_conn,red_cursor,data,header,rds_table_name)
+
+
+    except Exception as e:
+        print(f"Error: {e}")
+
+    finally:
+        # Close the database connection
+        red_conn.close()
+        red_cursor.close()
+        rds_conn.close()
+        rds_cursor.close()
+
+    return {
+        'statusCode': 200,
+        'body': json.dumps('Data fetched and dumped successfully!')
+    }

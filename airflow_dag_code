@@ -1,0 +1,213 @@
+from airflow import DAG
+from airflow.operators.python_operator import PythonOperator
+from datetime import datetime, timedelta
+from airflow.hooks.S3_hook import S3Hook
+from airflow.hooks.mysql_hook import MySqlHook
+import pandas as pd
+import logging
+import boto3
+from sqlalchemy import create_engine, inspect
+import warnings
+warnings.filterwarnings('ignore')
+from io import StringIO
+
+default_args = {
+    'owner': 'Sadhana_Patil',
+    'depends_on_past': False,
+    'start_date': datetime(2024, 4, 7),
+    'email_on_failure': False,
+    'email_on_retry': False,
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
+}
+
+dag = DAG(
+    'csv_dag_new',
+    default_args=default_args,
+    description='DAG to transfer file from RDS to S3',
+    schedule_interval=None,
+)
+
+def fetch_data_from_rds():
+    # Access RDS connection using Airflow connection ID
+    try:
+
+        rds_conn_id = 'rds_conn_id'
+        hook = MySqlHook(mysql_conn_id=rds_conn_id)
+
+        # Fetch data from RDS
+        query = "SELECT * FROM csv_app_csv_model;"
+        result = hook.get_records(query)
+        print(f"Fetched data from RDS: {result}")
+        return result
+    except Exception as e:
+        print(e)
+
+
+def get_tables_from_rds():
+    try:
+
+        connection_str = "mysql+pymysql://admin:admin2024@rds-database.clqy0cs2gq5p.ap-south-1.rds.amazonaws.com:3306/mysql_db"
+
+        # making connection
+        connection = create_engine(connection_str)
+        inspection = inspect(connection)
+
+        # checking tables in AWS RDS
+        rds_table_names = inspection.get_table_names()
+
+        # filter req. tables
+        filter_req_tables = [table for table in rds_table_names if table.endswith("_table")]
+
+        return filter_req_tables
+    except Exception as e:
+        print(e)
+
+
+def get_csv_from_s3():
+    try:
+
+        # s3 configuration
+        access_key = " "
+        secret_access_key = " "
+        bucket_name = "csv-rds-airflow-s3"
+
+        # creating client
+        s3 = boto3.client('s3',
+                          aws_access_key_id=access_key,
+                          aws_secret_access_key=secret_access_key)
+
+        # all files from s3
+
+        s3_files = []
+
+        try:
+            if list(s3.list_objects(Bucket=bucket_name)['Contents']):
+
+                for key in s3.list_objects(Bucket=bucket_name)['Contents']:
+                    s3_files.append(key['Key'])
+        except:
+            pass
+
+        # compare list
+        if s3_files:
+            compare_list = [file.split("/")[-1].split(".")[0] for file in s3_files if file.endswith(".csv")]
+
+            return compare_list
+        else:
+            return s3_files
+    except Exception as e:
+        print(e)
+
+
+def transfer_rds_to_s3():
+
+    try:
+        # collecting table names
+        rds_data = get_tables_from_rds()
+        s3_data = get_csv_from_s3()
+
+        # filter out unique tables to dump
+        unique_tables = list(set(rds_data) - set(s3_data))
+
+        # rds config
+        connection_str = "mysql+pymysql://admin:admin2024@rds-database.clqy0cs2gq5p.ap-south-1.rds.amazonaws.com:3306/mysql_db"
+
+        # s3 configuration
+        access_key = " "
+        secret_access_key = " "
+        bucket_name ="csv-rds-airflow-s3"
+
+        # checnkig if new data is available to send to s3
+        if not unique_tables:
+            return print(f"All csv's are alreday present in S3 bucket :: {bucket_name}. No new csv to upload.")
+
+        # creating s3 connection
+        s3 = boto3.client('s3',
+                          aws_access_key_id=access_key,
+                          aws_secret_access_key=secret_access_key)
+
+        # making connection
+        sql_engine = create_engine(connection_str)
+        print("engine created successfully")
+        connection = sql_engine.raw_connection()
+
+        # getting csv from rds in form of daatframe
+        for table in unique_tables:
+            # reading data as dataframe
+            querry = f"SELECT * FROM {table}"
+            print(querry)
+
+            df = pd.read_sql_query(sql=querry, con=connection)
+
+            # dumping csv to
+
+            csv_buf = StringIO()
+
+            df.to_csv(csv_buf, header=True, index=False)
+
+            csv_buf.seek(0)
+
+            key = "upload/" + table + ".csv"
+
+            s3.put_object(Bucket=bucket_name, Body=csv_buf.getvalue(), Key=key)
+
+            print(f"{key} successfully uploaded to s3 bucket: {bucket_name}")
+
+    except Exception as e:
+        print(e)
+
+
+def convert_to_csv(data):
+    try:
+        # Convert result to a DataFrame and save it as a CSV file
+        df = pd.DataFrame(data)
+        column_name = [str(column).lower() for column in df.columns]
+        df.columns = column_name
+        csv_content = df.to_csv(index=False)
+        print(f"Converted data to CSV: {csv_content}")
+        return csv_content
+
+    except Exception as e:
+        print(e)
+
+def upload_to_s3(csv_data):
+    try:
+
+        # Access S3 connection
+        s3_conn_id = 's3_conn_id'
+        s3_hook = S3Hook(aws_conn_id=s3_conn_id)
+
+        # Your code to upload data to S3
+        bucket_name = 'csv-rds-airflow-s3'
+        s3_key = f'Upload_metadata/metadata.csv'
+
+        # Upload CSV data to S3
+        s3_hook.load_string(string_data= csv_data, key=s3_key, bucket_name=bucket_name,replace=True)
+        print("Uploaded CSV data to S3")
+
+
+    except Exception as e:
+        print(e)
+
+
+def transfer_file_to_s3(**kwargs):
+    try:
+        data = fetch_data_from_rds()
+        csv_data = convert_to_csv(data)
+        upload_to_s3(csv_data)
+        logging.info("MetaData transfer to S3 successful.")
+        transfer_rds_to_s3()
+        logging.info("Csv_Data from RDS transfered to S3 successful.")
+    except Exception as e:
+        print(e)
+
+       # logging.error(f"Error during data transfer to S3: {str(e)}")
+        #raise
+
+task_transfer_to_s3 = PythonOperator(
+    task_id='transfer_to_s3',
+    python_callable=transfer_file_to_s3,
+    provide_context=True,
+    dag=dag,
+)

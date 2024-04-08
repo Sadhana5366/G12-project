@@ -1,0 +1,73 @@
+# import ing libraries
+import json
+import psycopg2
+import os
+import boto3
+import os
+
+from utils import aws_redshift_connection, fetc_from_redshift, write_to_csv, dump_to_s3
+
+def lambda_handler(event, context):
+
+    try:
+        
+        # create boto3 client for s3
+        s3 = boto3.client('s3')
+        
+        # file_name = "sample_table.csv"
+        # bucket_name = "task-2-bucket-first"
+        # filepath = "data_from_redshift/sample_table.csv"
+        
+        
+        
+        # creating connection with server
+        connection,curs = aws_redshift_connection()
+        curs.execute("SHOW TABLES FROM SCHEMA dev.public;")
+ 
+        connection.commit()
+        myresult = curs.fetchall()
+        print(myresult)
+        
+        table_list = [table[2] for table in list(myresult) if table[2].endswith("_table")]
+        
+        print(table_list)
+       
+        for red_table_name in table_list:
+        
+            file_name = red_table_name + ".csv"
+            
+            bucket_name = "task-2-bucket-first"
+            filepath = "data_from_redshift/" + file_name
+        
+        
+
+        
+            # fetching data
+            data = fetc_from_redshift(cursor=curs,query=f"SELECT * FROM {red_table_name};")
+            
+            header = data[0]
+            data = data[1:]
+            
+            print(header)
+            print(data)
+    
+            # writing data to csv
+            write_to_csv(data=data, header=header, file_name=file_name)
+    
+            # dump to s3
+            dump_to_s3(s3,file_name=file_name, destination_path=filepath,
+                      bucket_name=bucket_name)
+
+
+    except Exception as e:
+        print(f"Error: {e}")
+
+    finally:
+        # Close the database connection
+        curs.close()
+        connection.close()
+
+    return {
+        'statusCode': 200,
+        'body': json.dumps('Data fetched and dumped successfully!')
+    }

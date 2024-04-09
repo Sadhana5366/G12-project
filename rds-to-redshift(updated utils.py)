@@ -1,0 +1,143 @@
+import json
+import csv
+import psycopg2
+import os
+import pymysql
+import boto3
+from io import StringIO
+
+
+def aws_rds_connection():
+    
+    try:
+      
+        rds_db_name = os.getenv("rds_db_name")
+        rds_host = os.getenv("rds_host")
+        rds_user = os.getenv("rds_username")
+        rds_password = os.getenv("rds_password")
+
+
+        # Connect to RDS
+        rds_conn = pymysql.connect(database=rds_db_name, host=rds_host, user=rds_user, password=rds_password)
+        
+        rds_curs = rds_conn.cursor()
+        
+        return rds_conn,rds_curs
+
+    except Exception as e:
+        print(f"Error: {e}")
+        
+        
+def aws_redshift_connection():
+    try:
+        red_db_name = os.getenv("red_db_name")
+        red_host = os.getenv("red_host")
+        red_username= os.getenv("red_username")
+        red_password= os.getenv("red_password")
+    
+     # Connect to RDS
+        redshift_conn = psycopg2.connect(
+            dbname=red_db_name, host=red_host, port="5439", user=red_username, password=red_password
+        )
+        
+        redshift_curs = redshift_conn.cursor()
+        
+        return redshift_conn,redshift_curs
+        
+    except Exception as e:
+        print(f"Error: {e}")
+    
+        
+def fetc_from_rds(cursor, query):
+    
+    try:
+        cursor.execute(query)
+    
+        # Fetch the data
+        result = cursor.fetchall()
+    
+        return result
+    
+    except Exception as e:
+        print(f"Error: {e}")
+
+
+def write_to_csv(data, file_name, header=None):
+
+    try:
+
+        # preprocess data
+        data = [list(x) for x in data]
+        header= [list(x) for x in header]
+
+
+        with open(file='/tmp/'+file_name, mode='w', newline='') as fp:
+            writer = csv.writer(fp)
+
+            # writing header
+            writer.writerow(header)
+            writer.writerows(data)
+
+    except Exception as e:
+        print(f"Error: {e}")
+        
+        
+#def dump_to_s3(s3,bucket_name, file_name, destination_path):
+
+    #try:
+  #     s3.upload_file('/tmp/'+file_name, bucket_name, destination_path)
+    
+  # except Exception as e:
+    #    print(f"Error: {e}")
+    
+    
+def dump_to_redshift(table_name, red_conn,red_cursor):
+    try:
+        
+        csv_name = table_name + ".csv"
+        # S3 Connection Details
+        s3_bucket_name = 'trial-temp-bucket'
+        s3_key = csv_name
+        
+        # from path
+        from_path = f"s3://{s3_bucket_name}/{s3_key}"
+        
+        Access_key = os.getenv("AWS_access_key")
+        Access_secrete = os.getenv("AWS_secrete_access_key")
+        
+        # query to copy content of s3 csv file to redshift
+        querry = "COPY {} FROM '{}' CREDENTIALS 'aws_access_key_id={};aws_secret_access_key={}' CSV IGNOREHEADER 1;".format(table_name, from_path, Access_key, Access_secrete)
+        
+        # execute querry
+        red_cursor.execute(querry)
+        red_conn.commit()
+        
+        print(f"Data loaded in {table_name}!!!!")
+        
+        
+        
+            
+    except Exception as e:
+        print(f"Error: {e}")
+
+# write to s3
+
+def write_csv_to_s3(table_name, df):
+    
+    csv_name = table_name + ".csv"
+    
+    # S3 Connection Details
+    s3_bucket_name = 'trial-temp-bucket'
+    s3_key = csv_name
+    
+    # Save DataFrame to CSV string
+    csv_buffer = StringIO()
+    df.to_csv(csv_buffer, index=False)
+    csv_buffer.seek(0)
+    
+    # Upload CSV to S3
+    s3_client = boto3.client('s3')
+    s3_client.put_object(Bucket=s3_bucket_name, Key=s3_key, Body=csv_buffer.getvalue())
+    
+    print(f"{csv_name} uploaded to s3 !!!!")
+        

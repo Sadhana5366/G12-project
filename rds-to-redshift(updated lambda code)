@@ -1,0 +1,102 @@
+import json
+import boto3
+import pymysql
+import psycopg2
+import os
+import pandas as pd
+from sqlalchemy import create_engine,inspect
+
+
+
+from utils import aws_rds_connection, aws_redshift_connection, write_csv_to_s3, dump_to_redshift
+
+def lambda_handler(event, context):
+    
+    try:
+    
+        # creating connection with server
+        rds_conn,rds_cursor = aws_rds_connection()
+        print("rds connection done")
+            
+            
+        rds_cursor.execute("Show tables;")
+    
+        rds_conn.commit()
+        myresult = rds_cursor.fetchall()
+        
+        table_list = [table[0] for table in list(myresult) if table[0].endswith("_table")]
+        
+        print(table_list)
+        
+        # creating redshift connection
+        red_conn,red_cursor = aws_redshift_connection()
+        print("redshift connection done")
+        
+        
+        
+        for rds_table_name in table_list:
+            
+            print(rds_table_name)
+            
+            # fetching header from data
+            query = f"SELECT * FROM {rds_table_name}"
+            
+            df = pd.read_sql(query, rds_conn)
+            
+            print(df.head())
+            
+            write_csv_to_s3(rds_table_name, df)
+            
+            
+            # check if table of same name exsist or not
+            query = "SELECT DISTINCT tablename FROM pg_table_def WHERE schemaname = 'public';"
+            red_cursor.execute(query)
+            
+            # Fetch all table names
+            red_table_names = red_cursor.fetchall()
+            
+            red_table_names = [i[0] for i in red_table_names]
+            print(red_table_names)
+            
+            if rds_table_name not in red_table_names:
+            
+            
+                # Generate CREATE TABLE SQL dynamically based on DataFrame schema
+                create_table_sql = f"CREATE TABLE IF NOT EXISTS {rds_table_name} (\n"
+                
+                for column in df.columns:
+                    # Map pandas data types to Redshift data types
+                    redshift_type = 'VARCHAR' if df[column].dtype == 'object' else 'INTEGER' if df[column].dtype == 'int64' else 'REAL' if df[column].dtype == 'float64' else 'TIMESTAMP'
+                    
+                    create_table_sql += f"{column} {redshift_type},\n"
+                
+                
+                create_table_sql = create_table_sql.rstrip(',\n') + "\n)"
+                
+                print(create_table_sql)
+                
+                with red_conn.cursor() as cursor:
+                    cursor.execute(create_table_sql)
+                
+                red_conn.commit()
+                
+                
+                dump_to_redshift(rds_table_name, red_conn,red_cursor)
+                
+            else:
+                print(f"{rds_table_name} already exsist")
+    
+    except Exception as e:
+        print(e)
+        
+    finally:
+        
+        
+        # Close Redshift connection
+        red_conn.close()
+        rds_conn.close()
+
+    return {
+        'statusCode': 200,
+        'body': 'Data transferred successfully from RDS to Redshift'
+    }
